@@ -45,9 +45,10 @@ type cachedSlice struct {
 
 type wrpCache struct {
 	sync.Mutex
-	imgs   map[string]cachedImg
-	maps   map[string]cachedMap
-	slices map[string]cachedSlice
+	imgs    map[string]cachedImg
+	maps    map[string]cachedMap
+	slices  map[string]cachedSlice
+	sliceWg sync.WaitGroup // tracks in-flight /slice/ requests
 }
 
 func (c *wrpCache) addImg(path string, buf bytes.Buffer) {
@@ -96,6 +97,9 @@ func (c *wrpCache) getSlice(path string) (cachedSlice, bool) {
 }
 
 func (c *wrpCache) clear() {
+	// Wait for any in-flight /slice/ requests to finish before wiping
+	// the cache, otherwise the DSi gets 404s mid-page-load.
+	c.sliceWg.Wait()
 	c.Lock()
 	defer c.Unlock()
 	c.imgs = make(map[string]cachedImg)
@@ -106,7 +110,7 @@ func (c *wrpCache) clear() {
 func chromedpStart() (context.CancelFunc, context.CancelFunc) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", *headless),
-		chromedp.Flag("hide-scrollbars", false),
+		chromedp.Flag("hide-scrollbars", true),
 		chromedp.Flag("enable-automation", false),
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 	)
@@ -192,9 +196,6 @@ func ctxErr(err error, w io.Writer) {
 func waitForRender() chromedp.ActionFunc {
 	return func(ctx context.Context) error {
 		timeout := *delay
-		if timeout > 5*time.Second {
-			timeout = 5 * time.Second
-		}
 		ch := make(chan struct{}, 1)
 		lctx, lcancel := context.WithCancel(ctx)
 		defer lcancel()
@@ -291,6 +292,8 @@ func (rq *wrpReq) captureScreenshot() {
 	var h int64
 	var pngCap []byte
 
+	// ── Single CDP roundtrip: set narrow height, get layout metrics,
+	// resize to full height, wait for render, then screenshot. ────────────
 	chromedp.Run(ctx,
 		emulation.SetDeviceMetricsOverride(int64(float64(rq.width)/rq.zoom), 10, rq.zoom, false),
 		chromedp.Location(&rq.url),
@@ -301,20 +304,20 @@ func (rq *wrpReq) captureScreenshot() {
 			}
 			return nil
 		}),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			height := int64(float64(rq.height) / rq.zoom)
+			if rq.height == 0 && h > 0 {
+				height = h + 30
+			}
+			return emulation.SetDeviceMetricsOverride(int64(float64(rq.width)/rq.zoom), height, rq.zoom, false).Do(ctx)
+		}),
+		waitForRender(),
 	)
 	if rq.proxy {
 		rq.url = strings.Replace(rq.url, "https://", "http://", 1)
 	}
 	log.Printf("%s Landed on: %s, Height: %v\n", rq.r.RemoteAddr, rq.url, h)
 
-	height := int64(float64(rq.height) / rq.zoom)
-	if rq.height == 0 && h > 0 {
-		height = h + 30
-	}
-	chromedp.Run(ctx,
-		emulation.SetDeviceMetricsOverride(int64(float64(rq.width)/rq.zoom), height, rq.zoom, false),
-		waitForRender(),
-	)
 	ctxErr(chromedp.Run(ctx, chromedpCaptureScreenshot(&pngCap, rq.height)), rq.w)
 
 	// Decode the full-page PNG once; all paths below use this image.
@@ -385,60 +388,88 @@ func (rq *wrpReq) captureScreenshot() {
 	log.Printf("%s Done with capture for %s\n", rq.r.RemoteAddr, rq.url)
 }
 
+// sliceResult holds the encoded output of one strip for ordered collection.
+type sliceResult struct {
+	n       int
+	imgPath string
+	mapPath string
+	encoded []byte
+	stripH  int
+	yOffset int
+	err     error
+}
+
 // sliceAndCache cuts fullImg into strips of *sliceHeight pixels tall, encodes
-// each one, and stores them in the cache.  Every strip gets its own /map/
-// entry with sliceYOffset set so mapServer can correct click coordinates.
+// each strip concurrently, then stores results in the cache.  Every strip gets
+// its own /map/ entry with sliceYOffset set so mapServer can correct clicks.
 func (rq *wrpReq) sliceAndCache(fullImg image.Image, seq, ext string) []sliceEntry {
 	b := fullImg.Bounds()
 	totalH := b.Max.Y
 	totalW := b.Max.X
 	sh := *sliceHeight
 
-	var entries []sliceEntry
-
-	for n, y := 0, 0; y < totalH; n, y = n+1, y+sh {
+	// Pre-compute strip boundaries so we can launch all goroutines at once.
+	type stripBounds struct{ y, bottom int }
+	var bounds []stripBounds
+	for y := 0; y < totalH; y += sh {
 		bottom := y + sh
 		if bottom > totalH {
 			bottom = totalH
 		}
-
-		// Crop strip using draw into a fresh NRGBA so it works regardless
-		// of the source image type (NRGBA, YCbCr, etc.).
-		stripH := bottom - y
-		strip := image.NewNRGBA(image.Rect(0, 0, totalW, stripH))
-		draw.Draw(strip, strip.Bounds(), fullImg, image.Point{0, y}, draw.Src)
-
-		encoded, err := rq.encodeImage(strip)
-		if err != nil {
-			log.Printf("Slice %d encode error: %s", n, err)
-			continue
-		}
-
-		imgPath := fmt.Sprintf("/slice/%s_%d.%s", seq, n, ext)
-		mapPath := fmt.Sprintf("/map/%s_%d.map", seq, n)
-
-		wrpCach.addSlice(imgPath, cachedSlice{
-			buf:     *bytes.NewBuffer(encoded),
-			yOffset: y,
-		})
-
-		// Each map entry is a copy of the request with the strip's y-offset
-		// stored so mapServer can add it back to the raw ISMAP y on click.
-		rqCopy := *rq
-		rqCopy.sliceYOffset = y
-		wrpCach.addMap(mapPath, rqCopy)
-
-		entries = append(entries, sliceEntry{
-			ImgURL: imgPath,
-			MapURL: mapPath,
-			Width:  totalW,
-			Height: stripH,
-		})
-
-		log.Printf("Slice %d: y=%d-%d path=%s size=%.0fKB",
-			n, y, bottom, imgPath, float64(len(encoded))/1024.0)
+		bounds = append(bounds, stripBounds{y, bottom})
 	}
 
+	results := make([]sliceResult, len(bounds))
+	var wg sync.WaitGroup
+
+	for i, bnd := range bounds {
+		wg.Add(1)
+		go func(n, y, bottom int) {
+			defer wg.Done()
+			stripH := bottom - y
+
+			// Copy strip pixels into a fresh NRGBA — works regardless of
+			// source image type (NRGBA, YCbCr, etc.).
+			strip := image.NewNRGBA(image.Rect(0, 0, totalW, stripH))
+			draw.Draw(strip, strip.Bounds(), fullImg, image.Point{0, y}, draw.Src)
+
+			encoded, err := rq.encodeImage(strip)
+			results[n] = sliceResult{
+				n:       n,
+				imgPath: fmt.Sprintf("/slice/%s_%d.%s", seq, n, ext),
+				mapPath: fmt.Sprintf("/map/%s_%d.map", seq, n),
+				encoded: encoded,
+				stripH:  stripH,
+				yOffset: y,
+				err:     err,
+			}
+		}(i, bnd.y, bnd.bottom)
+	}
+	wg.Wait()
+
+	// Collect results in order and populate the cache.
+	var entries []sliceEntry
+	for _, r := range results {
+		if r.err != nil {
+			log.Printf("Slice %d encode error: %s", r.n, r.err)
+			continue
+		}
+		wrpCach.addSlice(r.imgPath, cachedSlice{
+			buf:     *bytes.NewBuffer(r.encoded),
+			yOffset: r.yOffset,
+		})
+		rqCopy := *rq
+		rqCopy.sliceYOffset = r.yOffset
+		wrpCach.addMap(r.mapPath, rqCopy)
+		entries = append(entries, sliceEntry{
+			ImgURL: r.imgPath,
+			MapURL: r.mapPath,
+			Width:  totalW,
+			Height: r.stripH,
+		})
+		log.Printf("Slice %d: y=%d-%d path=%s size=%.0fKB",
+			r.n, r.yOffset, r.yOffset+r.stripH, r.imgPath, float64(len(r.encoded))/1024.0)
+	}
 	return entries
 }
 
@@ -507,6 +538,10 @@ func imgServerSlice(w http.ResponseWriter, r *http.Request) {
 		log.Printf("%s Unable to find slice %s\n", r.RemoteAddr, r.URL.Path)
 		return
 	}
+	// Signal that a slice is being served. clear() will Wait() on this
+	// before wiping the cache so the DSi never gets a 404 mid-page-load.
+	wrpCach.sliceWg.Add(1)
+	defer wrpCach.sliceWg.Done()
 	serveImgBuf(w, r.URL.Path, sl.buf.Bytes())
 }
 
