@@ -1,87 +1,502 @@
 <HTML>
-    <HEAD>
-        <TITLE>WRP {{.URL}}</TITLE>
-    </HEAD>
-    <BODY BGCOLOR="{{.BgColor}}">
-        <FORM ACTION="/" METHOD="POST">
-            <INPUT TYPE="TEXT" NAME="url" VALUE="{{.URL}}" SIZE="20">
-            <INPUT TYPE="SUBMIT" VALUE="Go">
-            {{ if eq .WrpMode "ismap" }}
-            <INPUT TYPE="SUBMIT" NAME="Fn" VALUE="Bk">
-            <INPUT TYPE="SUBMIT" NAME="Fn" VALUE="St">
-            <INPUT TYPE="SUBMIT" NAME="Fn" VALUE="Re">
-            <INPUT TYPE="SUBMIT" NAME="Fn" VALUE="Up">
-            <INPUT TYPE="SUBMIT" NAME="Fn" VALUE="Dn">
-            W <INPUT TYPE="TEXT" NAME="w" VALUE="{{.Width}}" SIZE="4">
-            H <INPUT TYPE="TEXT" NAME="h" VALUE="{{.Height}}" SIZE="4">
-            {{ end }}
-            {{ if eq .WrpMode "html" }}
-            S <INPUT TYPE="TEXT" NAME="s" VALUE="{{.MaxSize}}" SIZE="4">
-            {{ end }}
-            {{ if eq .WrpMode "ismap" }}
-            Z <SELECT NAME="z">
-                <OPTION DISABLED>Zoom</OPTION>
-                <OPTION VALUE="0.7" {{ if eq .Zoom 0.7}}SELECTED{{end}}>0.7 x</OPTION>
-                <OPTION VALUE="0.8" {{ if eq .Zoom 0.8}}SELECTED{{end}}>0.8 x</OPTION>
-                <OPTION VALUE="0.9" {{ if eq .Zoom 0.9}}SELECTED{{end}}>0.9 x</OPTION>
-                <OPTION VALUE="1.0" {{ if eq .Zoom 1.0}}SELECTED{{end}}>1.0 x</OPTION>
-                <OPTION VALUE="1.1" {{ if eq .Zoom 1.1}}SELECTED{{end}}>1.1 x</OPTION>
-                <OPTION VALUE="1.2" {{ if eq .Zoom 1.2}}SELECTED{{end}}>1.2 x</OPTION>
-                <OPTION VALUE="1.3" {{ if eq .Zoom 1.3}}SELECTED{{end}}>1.3 x</OPTION>
+<HEAD>
+<TITLE>WRP</TITLE>
+<META NAME="viewport" CONTENT="width=256, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<STYLE TYPE="text/css">
+* { margin:0; padding:0; }
+
+BODY {
+    background:#0d0d0d;
+    width:256px;
+    overflow-x:hidden;
+    font-family:sans-serif;
+    font-size:9px;
+}
+
+#bar {
+    position:relative;
+    width:256px;
+    height:16px;
+    background:#111;
+    border-bottom:1px solid #333;
+}
+
+.btn {
+    position:absolute;
+    width:22px;
+    height:13px;
+    top:1px;
+    border:0;
+    padding:0;
+    background:none;
+    cursor:pointer;
+}
+
+.btn IMG {
+    width:22px;
+    height:13px;
+    display:block;
+    border:0;
+}
+
+#btn-bk   { left:1px;  }
+#btn-fw   { left:24px; }
+#btn-re   { left:47px; }
+#btn-srch { right:2px; }
+
+#url-wrap {
+    position:absolute;
+    left:71px;
+    top:1px;
+    width:159px;
+    height:12px;
+}
+
+#url-bg {
+    position:absolute;
+    top:0; left:0;
+    width:159px;
+    height:12px;
+    display:block;
+    border:0;
+}
+
+#url-input {
+    position:absolute;
+    top:-2px;
+    left:2px;
+    width:154px;
+    height:15px;
+    background:transparent;
+    border:0;
+    outline:0;
+    font-size:9px;
+    color:#000;
+}
+
+#page-wrap {
+    position:relative;
+    width:256px;
+    top:2px;
+}
+
+#page {
+    position:relative;
+    width:256px;
+    overflow:hidden;
+    z-index:1;
+}
+
+IMG.page-img  { display:block; border:0; }
+IMG.dsi-slice { display:block; border:0; }
+
+#scroll-up, #scroll-down {
+    position:absolute;
+    right:2px;
+    width:12px;
+    height:13px;
+    border:0;
+    padding:0;
+    background:none;
+    cursor:pointer;
+    z-index:10;
+}
+
+#scroll-up   { top:0;    }
+#scroll-down { top:14px; }
+
+#scroll-up IMG, #scroll-down IMG {
+    width:12px;
+    height:13px;
+    display:block;
+    border:0;
+}
+
+#btn-dots {
+    position:absolute;
+    left:2px;
+    top:2px;
+    width:16px;
+    height:13px;
+    border:0;
+    padding:0;
+    background:none;
+    cursor:pointer;
+    z-index:10;
+}
+
+#btn-dots IMG {
+    width:3px;
+    height:11px;
+    display:block;
+    border:0;
+}
+
+#menu {
+    display:none;
+    position:absolute;
+    top:20px;
+    left:0;
+    width:128px;
+    background:#111;
+    border:1px solid #444;
+    z-index:20;
+    padding:3px;
+}
+
+#menu LABEL {
+    display:block;
+    color:#ccc;
+    font-size:9px;
+    padding:1px 0;
+}
+
+#menu SELECT {
+    font-size:9px;
+    background:#1a1a1a;
+    color:#ccc;
+    border:1px solid #333;
+    width:100%;
+    padding:1px;
+    margin-bottom:2px;
+}
+
+#menu INPUT[type=text] {
+    font-size:9px;
+    background:#1a1a1a;
+    color:#ccc;
+    border:1px solid #333;
+    width:100%;
+    padding:1px;
+    margin-bottom:2px;
+}
+
+#menu INPUT[type=checkbox] {
+    vertical-align:middle;
+    margin-right:3px;
+}
+</STYLE>
+</HEAD>
+
+<BODY>
+
+<FORM ID="main-form" ACTION="/" METHOD="POST" ONSUBMIT="return onSubmit()">
+<INPUT TYPE="HIDDEN" NAME="w" VALUE="{{if .Width}}{{.Width}}{{else}}256{{end}}">
+<INPUT TYPE="HIDDEN" NAME="h" VALUE="{{if .Height}}{{.Height}}{{else}}0{{end}}">
+<INPUT TYPE="HIDDEN" NAME="t" ID="hid-t" VALUE="{{if .ImgType}}{{.ImgType}}{{else}}jpg{{end}}">
+<INPUT TYPE="HIDDEN" NAME="z" ID="hid-z" VALUE="{{if .Zoom}}{{.Zoom}}{{else}}0.5{{end}}">
+<INPUT TYPE="HIDDEN" NAME="m" ID="hid-m" VALUE="ismap">
+
+<DIV ID="bar">
+
+    <BUTTON TYPE="submit" NAME="Fn" VALUE="Bk" CLASS="btn" ID="btn-bk" ONCLICK="applySettings()">
+        <IMG SRC="images/arrow.jpg" ID="img-bk"
+             ONMOUSEDOWN="this.src='images/arrow_pressed.jpg'"
+             ONMOUSEUP="this.src='images/arrow.jpg'"
+             ONTOUCHSTART="this.src='images/arrow_pressed.jpg'"
+             ONTOUCHEND="this.src='images/arrow.jpg'" ALT="&lt;">
+    </BUTTON>
+
+    <BUTTON TYPE="submit" NAME="Fn" VALUE="St" CLASS="btn" ID="btn-fw" ONCLICK="applySettings()">
+        <IMG SRC="images/arrow2.jpg" ID="img-fw"
+             ONMOUSEDOWN="this.src='images/arrow2_pressed.jpg'"
+             ONMOUSEUP="this.src='images/arrow2.jpg'"
+             ONTOUCHSTART="this.src='images/arrow2_pressed.jpg'"
+             ONTOUCHEND="this.src='images/arrow2.jpg'" ALT="St">
+    </BUTTON>
+
+    <BUTTON TYPE="submit" NAME="Fn" VALUE="Re" CLASS="btn" ID="btn-re" ONCLICK="applySettings()">
+        <IMG SRC="images/refresh.jpg" ID="img-re"
+             ONMOUSEDOWN="this.src='images/refresh_pressed.jpg'"
+             ONMOUSEUP="this.src='images/refresh.jpg'"
+             ONTOUCHSTART="this.src='images/refresh_pressed.jpg'"
+             ONTOUCHEND="this.src='images/refresh.jpg'" ALT="Re">
+    </BUTTON>
+
+    <DIV ID="url-wrap">
+        <IMG SRC="images/searchbar.jpg" ID="url-bg" ALT="">
+        <INPUT TYPE="TEXT" NAME="url" ID="url-input"
+               VALUE="{{.URL}}"
+               ONINPUT="onUrlInput()"
+               ONFOCUS="onUrlFocus()">
+    </DIV>
+
+    <BUTTON TYPE="button" CLASS="btn" ID="btn-srch" ONCLICK="onSearchBtn()">
+        <IMG SRC="images/search.jpg" ID="img-srch" ALT="Go">
+    </BUTTON>
+
+    <DIV ID="menu">
+        <LABEL>Format
+            <SELECT ID="sel-t" ONCHANGE="saveSetting('t',this.value); applySettings(); submitMain()">
+                <OPTION VALUE="jpg" {{if eq .ImgType "jpg"}}SELECTED{{end}}>JPG</OPTION>
+                <OPTION VALUE="png" {{if eq .ImgType "png"}}SELECTED{{end}}>PNG</OPTION>
+                <OPTION VALUE="gif" {{if eq .ImgType "gif"}}SELECTED{{end}}>GIF</OPTION>
+                <OPTION VALUE="gip" {{if eq .ImgType "gip"}}SELECTED{{end}}>GIP</OPTION>
             </SELECT>
-            {{ end }}
-            M <SELECT NAME="m">
-                <OPTION DISABLED>Mode</OPTION>
-                <OPTION VALUE="ismap" {{ if eq .WrpMode "ismap"}}SELECTED{{end}}>ISMAP</OPTION>
-                <OPTION VALUE="html" {{ if eq .WrpMode "html"}}SELECTED{{end}}>HTML</OPTION>
+        </LABEL>
+        <LABEL>Zoom
+            <SELECT ID="sel-z" ONCHANGE="saveSetting('z',this.value); applySettings(); submitMain()">
+                <OPTION VALUE="0.25" {{if eq .Zoom 0.25}}SELECTED{{end}}>0.5x</OPTION>
+                <OPTION VALUE="0.5"  {{if eq .Zoom 0.5 }}SELECTED{{end}}>1x</OPTION>
+                <OPTION VALUE="0.65" {{if eq .Zoom 0.65}}SELECTED{{end}}>1.3x</OPTION>
+                <OPTION VALUE="0.75" {{if eq .Zoom 0.75}}SELECTED{{end}}>1.5x</OPTION>
+                <OPTION VALUE="1.0"  {{if eq .Zoom 1.0 }}SELECTED{{end}}>2x</OPTION>
             </SELECT>
-            T <SELECT NAME="t">
-                <OPTION DISABLED>Type</OPTION>
-                <OPTION VALUE="gip" {{ if eq .ImgType "gip"}}SELECTED{{end}}>GIP</OPTION>
-                <OPTION VALUE="png" {{ if eq .ImgType "png"}}SELECTED{{end}}>PNG</OPTION>
-                <OPTION VALUE="gif" {{ if eq .ImgType "gif"}}SELECTED{{end}}>GIF</OPTION>
-                <OPTION VALUE="jpg" {{ if eq .ImgType "jpg"}}SELECTED{{end}}>JPG</OPTION>
+        </LABEL>
+        <LABEL>Engine
+            <SELECT ID="sel-eng" ONCHANGE="saveSetting('eng',this.value)">
+                <OPTION VALUE="ddgl">Lite DDG</OPTION>
+                <OPTION VALUE="ddg">DuckDuckGo</OPTION>
+                <OPTION VALUE="google">Google</OPTION>
+                <OPTION VALUE="wiby">Wiby</OPTION>
             </SELECT>
-            {{ if eq .ImgType "gif" }}
-            C <SELECT NAME="c">
-                <OPTION DISABLED>Ncol</OPTION>
-                <OPTION VALUE="256" {{ if eq .NColors 256}}SELECTED{{end}}>256</OPTION>
-                <OPTION VALUE="216" {{ if eq .NColors 216}}SELECTED{{end}}>216</OPTION>
-                <OPTION VALUE="128" {{ if eq .NColors 128}}SELECTED{{end}}>128</OPTION>
-                <OPTION VALUE="64" {{ if eq .NColors 64}}SELECTED{{end}}>64</OPTION>
-                <OPTION VALUE="16" {{ if eq .NColors 16}}SELECTED{{end}}>16</OPTION>
-                <OPTION VALUE="2" {{ if eq .NColors 2}}SELECTED{{end}}>2</OPTION>
-            </SELECT>
-            {{ end }}
-            {{ if eq .ImgType "jpg" }}
-            Q <INPUT TYPE="TEXT" NAME="q" VALUE="{{.JQual}}" SIZE="2">%
-            {{ end }}
-            {{ if eq .WrpMode "ismap" }}
-            K <INPUT TYPE="TEXT" NAME="k" VALUE="" SIZE="4">
-            <INPUT TYPE="SUBMIT" NAME="Fn" VALUE="Bs">
-            <INPUT TYPE="SUBMIT" NAME="Fn" VALUE="Rt"><!--
-            <INPUT TYPE="SUBMIT" NAME="Fn" VALUE="All">
-            <INPUT TYPE="SUBMIT" NAME="Fn" VALUE="&lt;">
-            <INPUT TYPE="SUBMIT" NAME="Fn" VALUE="^">
-            <INPUT TYPE="SUBMIT" NAME="Fn" VALUE="v">
-            <INPUT TYPE="SUBMIT" NAME="Fn" VALUE="&gt;" SIZE="1">-->
-            {{ end }}
-        </FORM>
-        <BR>
-        {{if .ImgURL}}
-        <A HREF="{{.MapURL}}">
-            <IMG SRC="{{.ImgURL}}" BORDER="0" ALT="Url: {{.URL}}, Size: {{.ImgSize}} PageHeight: {{.PageHeight}}" WIDTH="{{.ImgWidth}}" HEIGHT="{{.ImgHeight}}" ISMAP>
-        </A>
-        <P>
-        {{end}}
-        {{.TeXT}}
-		<FONT SIZE="-2">
-		<A HREF="/?url=https://github.com/tenox7/wrp/&w={{.Width}}&h={{.Height}}&s={{printf "%.1f" .Zoom}}&c={{.NColors}}&t={{.ImgType}}">Web Rendering Proxy {{.Version}}</A> |
-		<A HREF="/shutdown/">Shutdown WRP</A> |
-        {{ if eq .WrpMode "ismap" }}
-		<A HREF="/">Page Height: {{.PageHeight}}</A> |
-		<A HREF="/">Img Size: {{.ImgSize}}</A>
-        {{end}}
-    </FONT>
-    </BODY>
+        </LABEL>
+        <LABEL>Size
+            <INPUT TYPE="TEXT" ID="wh-input"
+                   VALUE="{{if .Width}}{{.Width}}{{else}}256{{end}}x{{if .Height}}{{.Height}}{{else}}0{{end}}"
+                   ONCHANGE="saveWH(); applySettings(); submitMain()">
+        </LABEL>
+        <LABEL>
+            <INPUT TYPE="CHECKBOX" ID="cb-fit" ONCHANGE="saveSetting('fit',this.checked?'1':'0'); applySettings(); submitMain()">
+            Fit Width
+        </LABEL>
+        <LABEL>
+            <INPUT TYPE="CHECKBOX" ID="cb-txt" ONCHANGE="onPlainTextToggle()">
+            Plain Text
+        </LABEL>
+    </DIV>
+
+</DIV><!-- #bar -->
+
+</FORM>
+
+<DIV ID="page-wrap">
+
+    <BUTTON TYPE="button" ID="btn-dots" ONCLICK="toggleMenu()">
+        <IMG SRC="images/dots.png" ID="img-dots"
+             ONMOUSEDOWN="this.src='images/dots_pressed.png'"
+             ONMOUSEUP="this.src='images/dots.png'"
+             ONTOUCHSTART="this.src='images/dots_pressed.png'"
+             ONTOUCHEND="this.src='images/dots.png'" ALT="...">
+    </BUTTON>
+
+    <BUTTON TYPE="button" ID="scroll-up" ONCLICK="scrollPage(-1)">
+        <IMG SRC="images/arrow_up.jpg" ID="img-su"
+             ONMOUSEDOWN="this.src='images/arrow_up_pressed.jpg'"
+             ONMOUSEUP="this.src='images/arrow_up.jpg'"
+             ONTOUCHSTART="this.src='images/arrow_up_pressed.jpg'"
+             ONTOUCHEND="this.src='images/arrow_up.jpg'" ALT="^">
+    </BUTTON>
+
+    <BUTTON TYPE="button" ID="scroll-down" ONCLICK="scrollPage(1)">
+        <IMG SRC="images/arrow_down.jpg" ID="img-sd"
+             ONMOUSEDOWN="this.src='images/arrow_down_pressed.jpg'"
+             ONMOUSEUP="this.src='images/arrow_down.jpg'"
+             ONTOUCHSTART="this.src='images/arrow_down_pressed.jpg'"
+             ONTOUCHEND="this.src='images/arrow_down.jpg'" ALT="v">
+    </BUTTON>
+
+    <DIV ID="page">
+
+    {{/* ── Sliced page: one form per strip ── */}}
+    {{if .SliceList}}
+    {{range .SliceList}}
+    <FORM ACTION="/" METHOD="POST">
+    <INPUT TYPE="HIDDEN" NAME="url"  VALUE="{{$.URL}}">
+    <INPUT TYPE="HIDDEN" NAME="m"    VALUE="{{$.WrpMode}}">
+    <INPUT TYPE="HIDDEN" NAME="t"    VALUE="{{$.ImgType}}">
+    <INPUT TYPE="HIDDEN" NAME="w"    VALUE="{{if $.Width}}{{$.Width}}{{else}}256{{end}}">
+    <INPUT TYPE="HIDDEN" NAME="h"    VALUE="{{if $.Height}}{{$.Height}}{{else}}0{{end}}">
+    <INPUT TYPE="HIDDEN" NAME="z"    VALUE="{{$.Zoom}}">
+    <A HREF="{{.MapURL}}">
+        <IMG SRC="{{.ImgURL}}" BORDER="0"
+             WIDTH="{{.Width}}" HEIGHT="{{.Height}}"
+             CLASS="dsi-slice" ISMAP>
+    </A>
+    </FORM>
+    {{end}}
+
+    {{/* ── Single full-page image (slice mode off or page too short) ── */}}
+    {{else if .ImgURL}}
+    <FORM ACTION="/" METHOD="POST">
+    <INPUT TYPE="HIDDEN" NAME="url" VALUE="{{.URL}}">
+    <INPUT TYPE="HIDDEN" NAME="m"   VALUE="{{.WrpMode}}">
+    <INPUT TYPE="HIDDEN" NAME="t"   VALUE="{{.ImgType}}">
+    <INPUT TYPE="HIDDEN" NAME="w"   VALUE="{{if .Width}}{{.Width}}{{else}}256{{end}}">
+    <INPUT TYPE="HIDDEN" NAME="h"   VALUE="{{if .Height}}{{.Height}}{{else}}0{{end}}">
+    <INPUT TYPE="HIDDEN" NAME="z"   VALUE="{{.Zoom}}">
+    <A HREF="{{.MapURL}}">
+        <IMG SRC="{{.ImgURL}}" BORDER="0"
+             WIDTH="{{.ImgWidth}}" HEIGHT="{{.ImgHeight}}"
+             CLASS="page-img" ISMAP>
+    </A>
+    </FORM>
+    {{end}}
+
+    {{.TeXT}}
+    </DIV>
+
+</DIV><!-- #page-wrap -->
+
+<SCRIPT TYPE="text/javascript">
+// ── Cookie helpers ────────────────────────────────────────────────────
+function getCookie(name) {
+    var v = document.cookie, i = v.indexOf(name + "=");
+    if (i < 0) return null;
+    var j = v.indexOf(";", i);
+    return j < 0 ? v.substring(i + name.length + 1)
+                 : v.substring(i + name.length + 1, j);
+}
+
+function saveSetting(name, value) {
+    document.cookie = name + "=" + value + "; path=/; max-age=31536000";
+}
+
+// ── Restore settings from cookies ────────────────────────────────────
+function restoreSettings() {
+    var t   = getCookie("t")   || "jpg";
+    var z   = getCookie("z")   || "0.5";
+    var eng = getCookie("eng") || "ddgl";
+    var fit = getCookie("fit");
+    if (fit === null) fit = "1";
+
+    setSelect("sel-t",   t);
+    setSelect("sel-z",   z);
+    setSelect("sel-eng", eng);
+
+    var cbFit = document.getElementById("cb-fit");
+    if (cbFit) cbFit.checked = (fit === "1");
+
+    var cbTxt = document.getElementById("cb-txt");
+    if (cbTxt) cbTxt.checked = ("{{.WrpMode}}" === "html");
+
+    applySettings();
+}
+
+function setSelect(id, value) {
+    var sel = document.getElementById(id);
+    if (!sel) return;
+    for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === value) { sel.selectedIndex = i; return; }
+    }
+}
+
+// ── Push UI state into hidden fields ─────────────────────────────────
+function applySettings() {
+    var f   = document.getElementById("main-form");
+    var fit = getCookie("fit");
+    if (fit === null) fit = "1";
+
+    var selT = document.getElementById("sel-t");
+    if (selT) f.elements["t"].value = selT.value;
+
+    var selZ = document.getElementById("sel-z");
+    if (selZ) f.elements["z"].value = selZ.value;
+
+    if (fit === "1") {
+        f.elements["w"].value = 256;
+        f.elements["h"].value = 0;
+    } else {
+        saveWH();
+    }
+
+    var cbTxt = document.getElementById("cb-txt");
+    f.elements["m"].value = (cbTxt && cbTxt.checked) ? "html" : "ismap";
+}
+
+function saveWH() {
+    var raw = document.getElementById("wh-input").value;
+    var parts = raw.toLowerCase().split("x");
+    var w = parseInt(parts[0], 10);
+    var h = parts.length > 1 ? parseInt(parts[1], 10) : 0;
+    saveSetting("wh", raw);
+    var f = document.getElementById("main-form");
+    if (!isNaN(w) && w > 0) f.elements["w"].value = w;
+    if (!isNaN(h)) f.elements["h"].value = h;
+}
+
+function onPlainTextToggle() { applySettings(); submitMain(); }
+function submitMain() { document.getElementById("main-form").submit(); }
+function onSubmit() { applySettings(); return true; }
+
+// ── URL bar ───────────────────────────────────────────────────────────
+var _loadedUrl = "{{.URL}}";
+
+var _engines = {
+    "ddgl":   "https://lite.duckduckgo.com/lite/?q=",
+    "ddg":    "https://duckduckgo.com/?q=",
+    "google": "https://www.google.com/search?q=",
+    "wiby":   "https://wiby.me/?q="
+};
+
+function _resolveUrl(raw) {
+    raw = raw.replace(/^\s+|\s+$/g, "");
+    if (!raw) return raw;
+    if (raw.indexOf("://") !== -1) return raw;
+    if (raw.indexOf(" ") === -1 && raw.indexOf(".") !== -1) return "http://" + raw;
+    var base = _engines[getCookie("eng") || "ddgl"] || _engines["ddgl"];
+    return base + encodeURIComponent(raw);
+}
+
+function _updateSearchIcon() {
+    var val = document.getElementById("url-input").value;
+    var img = document.getElementById("img-srch");
+    img.src = (_loadedUrl !== "" && val === _loadedUrl)
+        ? "images/clear.jpg" : "images/search.jpg";
+}
+
+function onUrlInput() { _updateSearchIcon(); }
+function onUrlFocus() { _updateSearchIcon(); }
+
+function onSearchBtn() {
+    var inp = document.getElementById("url-input");
+    var img = document.getElementById("img-srch");
+    if (img.src.indexOf("clear") !== -1) {
+        inp.value = "";
+        _loadedUrl = "";
+        img.src = "images/search.jpg";
+    } else {
+        inp.value = _resolveUrl(inp.value);
+        applySettings();
+        submitMain();
+    }
+}
+
+document.getElementById("url-input").onkeypress = function(e) {
+    var key = e ? e.keyCode : window.event.keyCode;
+    if (key === 13) {
+        this.value = _resolveUrl(this.value);
+        applySettings();
+        submitMain();
+        return false;
+    }
+};
+
+// ── Dots menu ─────────────────────────────────────────────────────────
+function toggleMenu() {
+    var m = document.getElementById("menu");
+    var isOpen = m.style.display === "block";
+    m.style.display = isOpen ? "none" : "block";
+    document.getElementById("img-dots").src =
+        isOpen ? "images/dots.png" : "images/dots_pressed.png";
+}
+
+// ── Scroll (WRP server-side scroll) ──────────────────────────────────
+function scrollPage(dir) {
+    applySettings();
+    var f  = document.getElementById("main-form");
+    var fn = document.createElement("input");
+    fn.type  = "hidden";
+    fn.name  = "Fn";
+    fn.value = dir < 0 ? "\u2191" : "\u2193";
+    f.appendChild(fn);
+    f.submit();
+}
+
+// ── Init ──────────────────────────────────────────────────────────────
+restoreSettings();
+_updateSearchIcon();
+</SCRIPT>
+
+</BODY>
 </HTML>

@@ -45,6 +45,7 @@ var (
 	searchEng   = flag.String("se", "https://duckduckgo.com/search?q=", "Search engine string")
 	userDataDir = flag.String("profile", "", "Chrome user data dir for persistent cookies/sessions")
 	bgColor     = flag.String("bgcolor", "#F0F0F0", "Background color for WRP UI")
+	sliceHeight = flag.Int("slice", 0, "DSi slice mode: split tall screenshots into strips of this height (px). 0=disabled")
 )
 
 var (
@@ -88,6 +89,8 @@ type uiData struct {
 	MapURL     string
 	PageHeight string
 	TeXT       string
+	// DSi slice mode: set instead of ImgURL/MapURL when -slice>0
+	SliceList []sliceEntry
 }
 
 // Parameters for HTML print function
@@ -100,6 +103,7 @@ type uiParams struct {
 	imgWidth   int
 	imgHeight  int
 	text       string
+	sliceList  []sliceEntry
 }
 
 // WRP Request
@@ -117,9 +121,10 @@ type wrpReq struct {
 	imgType string
 	wrpMode string
 	maxSize int64
-	proxy   bool
-	w       http.ResponseWriter
-	r       *http.Request
+	proxy        bool
+	sliceYOffset int // y-offset of this strip in the full page (0 for non-sliced)
+	w            http.ResponseWriter
+	r            *http.Request
 }
 
 func (rq *wrpReq) baseTag() string {
@@ -203,6 +208,7 @@ func (rq *wrpReq) printUI(p uiParams) {
 		MapURL:     p.mapURL,
 		PageHeight: p.pageHeight,
 		TeXT:       p.text,
+		SliceList:  p.sliceList,
 	}
 	err := htmlTmpl.Execute(rq.w, data)
 	if err != nil {
@@ -373,10 +379,12 @@ func main() {
 
 	wrpCach.imgs = make(map[string]cachedImg)
 	wrpCach.maps = make(map[string]cachedMap)
+	wrpCach.slices = make(map[string]cachedSlice)
 
 	http.HandleFunc("/", pageServer)
 	http.HandleFunc("/map/", mapServer)
 	http.HandleFunc("/img/", imgServerMap)
+	http.HandleFunc("/slice/", imgServerSlice)
 	http.HandleFunc(imgZpfx, imgServerTxt)
 	http.HandleFunc("/proxy.pac", pacServer)
 	http.HandleFunc("/shutdown/", haltServer)
